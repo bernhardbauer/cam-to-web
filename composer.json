@@ -1,0 +1,15 @@
+{
+    "name": "bbauer/cam-to-web",
+    "description": "Easily re-stream RTSP feeds to WEB using a JavaScript only player",
+    "type": "library",
+    "require": {
+        "cboden/ratchet": "^0.4.1"
+    },
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Bernhard Bauer",
+            "email": "bernhard.bauer@bbmk.at"
+        }
+    ]
+}
