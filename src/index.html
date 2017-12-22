@@ -1,30 +1,64 @@
-<!DOCTYPE html>
 <html>
-	<head>
-		<meta charset="utf-8">
-		<title></title>
-	</head>
-	<body>
+    <head>
+        <title>Live EvoStream WebSocket Video</title>
+        <meta charset="UTF-8">
+        <script src="http://ers.evostream.com:5050/demo/js/evohtml5player.bundle.js"></script>
+        <!-- <script>
+            var ws;
 
-		<script type="text/javascript">
-			var ws = new WebSocket('ws://127.0.0.1:8100');
-			// connection.binaryType = 'arraybuffer';
+            function startPlay(uri) {
 
-			// When the connection is open, send some data to the server
+                initializePlayer();
+
+                var streamURI = uri;
+                streamURI += "?progressive";
+
+                //connect to the streaming server via WS
+                ws = new WebSocket(streamURI);
+                ws.binaryType = 'arraybuffer';
+
+                //setup the handler for when data arrives via WS
+                ws.onmessage = function (msg) {
+                   var arrayView = new Uint8Array(msg.data);
+				   console.log('data received', arrayView);
+                   parseData(arrayView);
+               };
+           }
+        </script> -->
+    </head>
+    <body>
+        <!-- <video id="videoElement" autoplay></video><br> -->
+		<canvas id="myCanvas" width="600" height="600"></canvas>
+        <script>
+        //    startPlay('ws://192.168.1.50:7445/WHBhpUo_F09FC22F92A0_1');
+
+			var c = document.getElementById("myCanvas");
+			var ctx = c.getContext("2d");
+
+			ws = new WebSocket('ws://127.0.0.1:8100');
+			ws.binaryType = 'arraybuffer';
+
 			ws.onopen = function () {
-				console.log('WS open');
-				// ws.send('Ping'); // Send the message 'Ping' to the server
-			};
+				ws.send('client hello');
+				console.log('sending hello');
+			}
 
-			// Log errors
-			ws.onerror = function (error) {
-				console.log('WebSocket Error ' + error);
+			//setup the handler for when data arrives via WS
+			ws.onmessage = function (msg) {
+				console.log('test');
+				// var arrayView = new Uint8Array(msg.data);
+				// console.log('data received');
+				// parseData(arrayView);
+				//
+				// var imgData = ctx.createImageData(100,100);
+				// for (var i=0; i<arrayView.length; i+=4) {
+				// 	imgData.data[i+0] = arrayView[i];
+				// 	imgData.data[i+1] = arrayView[i+1];
+				// 	imgData.data[i+2] = arrayView[i+2];
+				// 	imgData.data[i+3] = arrayView[i+3];
+				// }
+				// ctx.putImageData(imgData,10,10);
 			};
-
-			// Log messages from the server
-			ws.onmessage = function (e) {
-				//console.log('Server: ' + e.data);
-			};
-		</script>
-	</body>
+        </script>
+    </body>
 </html>

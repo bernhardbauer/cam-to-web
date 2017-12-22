@@ -2,8 +2,10 @@
 
 	namespace bbauer\CamToApp;
 
+	use Ratchet\Http\HttpServer;
 	use Ratchet\Server\IoServer;
-	use Ratchet\MessageComponentInterface;
+	use Ratchet\WebSocket\WsServer;
+	use Ratchet\WebSocket\MessageComponentInterface;
 	use React\ChildProcess\Process as ChildProcess;
 	use React\EventLoop\Factory as LoopFactory;
 	use React\Socket\Server as Reactor;
@@ -55,7 +57,11 @@
 			$this->loop = LoopFactory::create();
 			$socket = new Reactor($this->address . ':' . $port, $this->loop);
 			$this->ioserver = new IoServer(
-				$this->ws_app,
+				new HttpServer(
+					new WsServer(
+						$this->ws_app
+					)
+				),
 				$socket,
 				$this->loop
 			);
