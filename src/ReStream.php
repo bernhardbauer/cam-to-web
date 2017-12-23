@@ -1,14 +1,17 @@
 <?php
 
-	namespace bbauer\CamToApp;
+	namespace bbauer\CamToWeb;
 
+	use bbauer\CamToWeb\Server\BroadcastServer;
+	use bbauer\CamToWeb\Server\ServerTest;
 	use Ratchet\Http\HttpServer;
 	use Ratchet\Server\IoServer;
 	use Ratchet\WebSocket\WsServer;
 	use Ratchet\WebSocket\MessageComponentInterface;
 	use React\ChildProcess\Process as ChildProcess;
 	use React\EventLoop\Factory as LoopFactory;
-	use React\Socket\Server as Reactor;
+	use React\Socket\ConnectionInterface;
+	use React\Socket\Server as SocketServer;
 
 	require dirname(__DIR__).'/vendor/autoload.php';
 
@@ -43,6 +46,9 @@
 		private $benchmark_start = 0;
 		private $image_count = 0;
 
+		// Memory monitoring
+		private $memory_timer;
+
 		/**
 		 * Construct the re-streaming service
 		 *
@@ -53,18 +59,9 @@
 			$this->ws_app = $ws_app;
 			$this->port = $port;
 			$this->lines_learning = array_pad([], $this->learning_cycles_necessary, 0);
-
 			$this->loop = LoopFactory::create();
-			$socket = new Reactor($this->address . ':' . $port, $this->loop);
-			$this->ioserver = new IoServer(
-				new HttpServer(
-					new WsServer(
-						$this->ws_app
-					)
-				),
-				$socket,
-				$this->loop
-			);
+
+			$this->setupWebSocketServer($this->address, $this->port);
 		}
 
 		/**
@@ -90,6 +87,84 @@
 			});
 		}
 
+		public function setupWebSocketServer($address, $port) {
+			$socket = new SocketServer($address.':'.$port, $this->loop);
+
+			// /** @var ConnectionInterface $conn */
+			// $socket->on('connection', function ($conn) {
+			// 	echo "=> New connection (".$conn->getRemoteAddress().") ;)\n";
+			// });
+			$socket->on('error', 'printf');
+
+			$server = new ServerTest($socket, $this->loop);
+
+			// $this->ioserver = new IoServer(
+			// 	new HttpServer(
+			// 		new WsServer(
+			// 			$this->ws_app
+			// 		)
+			// 	),
+			// 	$socket,
+			// 	$this->loop
+			// );
+
+			// try {
+			// 	$this->ws_app = new BroadcastServer($address, $port);
+			// 	$this->loop->addPeriodicTimer(0, function ($timer) {
+			// 		try {
+			// 			$this->ws_app->run();
+			// 		} catch (\Exception $e) {
+			// 			$this->ws_app->stdout($e->getMessage());
+			// 		}
+			// 	});
+			// } catch (\Exception $e) {
+			// 	echo "Exception:".PHP_EOL;
+			// 	echo $e->getMessage().PHP_EOL;
+			// }
+
+
+
+			// $this->ffmpeg = new ChildProcess($command);
+			// $this->ffmpeg->start($this->loop);
+			// $this->benchmark_start = time();
+			//
+			// $this->ffmpeg->stdout->on('data', function ($chunk) {
+			// 	$this->process($chunk);
+			// });
+			//
+			// $this->ffmpeg->on('exit', function($exitCode, $termSignal) {
+			// 	echo 'Process exited with code ' . $exitCode . PHP_EOL;
+			// });
+
+		}
+
+		public function setupMonitoring() {
+			$this->memory_timer = $this->loop->addPeriodicTimer(10, function () {
+				$memory_usage = number_format(((memory_get_usage(true) / 1024) / 1024), 2); // MB
+				$memory_peak_usage = number_format(((memory_get_peak_usage(true) / 1024) / 1024), 2); // MB
+
+				echo "=====   Memory usage   =====".PHP_EOL;
+				echo "> Now:  ".$memory_usage." MB".PHP_EOL;
+				echo "> Peak: ".$memory_peak_usage." MB".PHP_EOL;
+
+
+				echo "=====   Benchmark Results   =====".PHP_EOL;
+				$benchmark_end = time();
+				$time_elapsed = (intval($benchmark_end) - intval($this->benchmark_start));
+				echo "> Images: ".$this->image_count.PHP_EOL;
+				echo "> Start: ".$this->benchmark_start.PHP_EOL;
+				echo "> End: ".$benchmark_end.PHP_EOL;
+				echo "> Elapsed: ".$time_elapsed." seconds".PHP_EOL;
+				echo "> FPS: ".floatval(floatval($this->image_count) / floatval($time_elapsed)).PHP_EOL;
+			});
+		}
+
+		/**
+		 * Processes an input stream of concatenated jpeg images
+		 * Images get extracted out of the stream o be sent to multiple clients
+		 *
+		 * @param mixed line the input data (binary string)
+		 */
 		public function process($line) {
 			// $this->lines_to_skip = 0;
 			// Check for start of image -> SOI
@@ -138,7 +213,9 @@
 			// Assume that the image is valid (because of performance considerations)
 			$this->image_count++;
 			// Broadcast image over websocket server
-			$this->ws_app->broadcastImage($this->image_buffer);
+			// $this->ws_app->broadcastImage($this->image_buffer);
+			// $this->ws_app->broadcast('hello');
+			// $this->ws_app->broadcastBinary($this->image_buffer);
 
 			// Reset image buffer and start the next image
 			$this->image_buffer = '';
@@ -152,21 +229,15 @@
 				$this->lines_to_skip = max((min($this->lines_learning) - 15), 0);
 				echo "Learning finished with learning cycle $this->learning_cycle. Learned skip value is $this->lines_to_skip\n";
 			}
-
-			if (($this->image_count % 100) === 0) {
-				$benchmark_end = time();
-				$time_elapsed = (intval($benchmark_end) - intval($this->benchmark_start));
-				echo "=== Benchmark Results ===\n";
-				echo "Images: $this->image_count\n";
-				echo "Start: $this->benchmark_start\n";
-				echo "End: $benchmark_end\n";
-				echo "Elapsed: $time_elapsed seconds\n";
-				echo "FPS: ".floatval(floatval($this->image_count) / floatval($time_elapsed))."\n";
-			}
 		}
 
 		public function run() {
-			$this->ioserver->run(); // Runs the react event loop
+			if ($this->loop !== null) {
+				$this->loop->run();
+			} else {
+				echo "[Critical] Could not start event loop!".PHP_EOL;
+			}
+			// $this->ioserver->run(); // Runs the react event loop
 		}
 
 	}
@@ -177,6 +248,7 @@
 		new WebSocketServer(),
 		'8100'
 	);
+	$restream->setupMonitoring();
 	$restream->setupFFMPEG([
 		'-y',
 		'-rtsp_transport tcp',

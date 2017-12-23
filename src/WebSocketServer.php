@@ -10,7 +10,7 @@
 	/* @author Bernhard Bauer                    */
 	/*********************************************/
 
-	namespace bbauer\CamToApp;
+	namespace bbauer\CamToWeb;
 
 	use Ratchet\ConnectionInterface;
 	use Ratchet\RFC6455\Messaging\MessageInterface;
@@ -29,7 +29,6 @@
 		 */
 		public function onOpen(ConnectionInterface $conn) {
 			$this->connections[] = $conn;
-			$conn->send('Hello from the "bbmk management" web socket server ;)');
 			echo 'New connection'."\n";
 		}
 
@@ -61,37 +60,8 @@
 		 */
 		public function onError(ConnectionInterface $conn, \Exception $e) {
 			echo "An error occurred\n";
-			$conn->send('An unexpected error ocurred. The connection will be closed!');
 			$conn->close();
 		}
-
-		// /**
-		//  * Sends a message to all web socket clients of a given channel
-		//  *
-		//  * @param string $channel the channel to which a message should be sent
-		//  * @param string $data_identifier an identifier of the data which should be sent
-		//  * @param mixed $data the data which should be sent
-		//  * @param bool $server_message true if the message originated from the server, otherwise false
-		//  * @return int returns the number of clients to which the message has been sent
-		//  */
-		// private function broadcast($channel, $data_identifier, $data, $server_message = true) {
-		// 	$channel = strtolower($channel);
-		// 	$broadcasted_to_count = 0;
-		//
-		// 	// Send a message to all clients of a channel
-		// 	if (isset($this->subscriptions[$channel])) {
-		// 		$channel_subscriptions = $this->subscriptions[$channel];
-		//
-		// 		foreach($channel_subscriptions as $connections) {
-		// 			foreach($connections as $conn) {
-		// 				$conn->send($this->buildJSONResponse($channel, $data_identifier, $data, $server_message));
-		// 				$broadcasted_to_count++;
-		// 			}
-		// 		}
-		// 	}
-		//
-		// 	return $broadcasted_to_count;
-		// }
 
 		// Invokes the garbage collector to free up memory if neccessary
 		private function invokeGC() {
@@ -111,8 +81,7 @@
 
 		public function broadcastImage($image) {
 			foreach ($this->connections as $conn) {
-				echo "broadcast\n";
-				$conn->send($image, true);
+				$conn->send(base64_encode($image));
 			}
 			// $this->clients->rewind();
 			// while($this->clients->valid()) {
