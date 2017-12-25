@@ -6,34 +6,41 @@
     </head>
     <body>
         <!-- <video id="videoElement" autoplay></video><br> -->
-		<canvas id="myCanvas" width="600" height="600" style="max-width:1000px;max-height:600px;"></canvas>
+		<canvas id="myCanvas" width="600" height="600" style="max-width:600px;max-height:400px;"></canvas>
+		<canvas id="myCanvas2" width="600" height="600" style="max-width:600px;max-height:400px;"></canvas>
         <script>
 			var c = document.getElementById("myCanvas");
 			var ctx = c.getContext("2d");
 
-			ws = new WebSocket('ws://127.0.0.1:8100');
+			ws = new WebSocket('ws://127.0.0.1:8090');
 			ws.binaryType = 'arraybuffer';
 
 			ws.onopen = function () {
-				// ws.send('client hello');
-				console.log('hello');
+				console.log('Websocket connection opened on url "'+ws.URL+'"');
+				// console.log(ws);
 			}
 
 			//setup the handler for when data arrives via WS
-			ws.onmessage = function (msg) {console.log(msg.data);
+			ws.onmessage = function (msg) {
+				// console.log(msg.data);
 				// console.log('test', msg.data.substr(0, 20));
 				// console.log(_base64ToArrayBuffer(msg.data));
 
 				// var arrayView = convertBinaryStringToUint8Array(atob(msg.data));
-				decodeImage("myCanvas", new Uint8Array(msg.data));
-				// var imgData = ctx.createImageData(100,100);
-				// for (var i=0; i<arrayView.length; i+=4) {
-				// 	imgData.data[i+0] = arrayView[i];
-				// 	imgData.data[i+1] = arrayView[i+1];
-				// 	imgData.data[i+2] = arrayView[i+2];
-				// 	imgData.data[i+3] = arrayView[i+3];
-				// }
-				// ctx.putImageData(imgData,10,10);
+
+				var image_data = new Uint8Array(msg.data);
+				decodeImage("myCanvas", image_data);
+
+				var canvas = document.getElementById("myCanvas2");
+				var ctx = canvas.getContext('2d');
+				var imgData = ctx.createImageData(100,100);
+				for (var i=0; i<image_data.length; i+=4) {
+					imgData.data[i+0] = image_data[i];
+					imgData.data[i+1] = image_data[i+1];
+					imgData.data[i+2] = image_data[i+2];
+					imgData.data[i+3] = image_data[i+3];
+				}
+				ctx.putImageData(imgData,10,10);
 			};
 
 

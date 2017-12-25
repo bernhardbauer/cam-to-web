@@ -1,5 +1,7 @@
 <?php
 
+	namespace bbauer\CamToWeb\Server;
+
 	/*
 		This websocket server is based on "PHP WebSockets (https://github.com/ghedipunk/PHP-Websockets)"
 
@@ -15,30 +17,91 @@
 		THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 	*/
 
-	namespace bbauer\CamToWeb\Server;
-
 	use bbauer\CamToWeb\Server\WebSocketUser;
+	use React\EventLoop\LoopInterface;
+	use React\Socket\ConnectionInterface;
+	use React\Socket\Server;
+	use React\Socket\ServerInterface;
 
 	abstract class WebSocketServer {
 
-		protected $maxBufferSize;
+		/** @var LoopInterface $loop */
+		public $loop;
+		/** @var ServerInterface $socket */
+		public $socket;
+
+		private $address;
+		private $port;
+
 		protected $master;
-		protected $sockets                              = array();
-		protected $users                                = array();
-		protected $interactive                          = true;
-		protected $headerOriginRequired                 = false;
-		protected $headerSecWebSocketProtocolRequired   = false;
+		protected $sockets = array();
+		protected $users = array();
+		protected $bytesSent = 0; // Total bytes sent from the websocket server
+		protected $interactive = true; // more output
+		protected $headerOriginRequired = false;
+		protected $headerSecWebSocketProtocolRequired = false;
 		protected $headerSecWebSocketExtensionsRequired = false;
 
-		function __construct($addr, $port, $bufferLength = 2048) {
-			$this->maxBufferSize = $bufferLength;
-			$this->master = socket_create(AF_INET, SOCK_STREAM, SOL_TCP)  or die("Failed: socket_create()");
-			socket_set_option($this->master, SOL_SOCKET, SO_REUSEADDR, 1) or die("Failed: socket_option()");
-			socket_bind($this->master, $addr, $port)                      or die("Failed: socket_bind()");
-			socket_listen($this->master,20)                               or die("Failed: socket_listen()");
-			$this->sockets['m'] = $this->master;
+		/**
+		 * @param ServerInterface $socket
+		 * @param LoopInterface|null $loop
+		 */
+		public function __construct(LoopInterface $loop = null, $address = '0.0.0.0', $port = '8080') {
+			if (strpos(PHP_VERSION, "hiphop") === false) {
+				gc_enable();
+			}
 
-			$this->stdout("Server started\nListening on: $addr:$port\nMaster socket: ".$this->master);
+			set_time_limit(0);
+			ob_implicit_flush();
+
+			$this->loop = $loop;
+			$this->address = strval($address);
+			$this->port = strval($port);
+			$this->socket = new Server($this->address.':'.$this->port, $this->loop); // New socket server
+
+			$this->socket->on('error', 'printf'); // TODO do something with socket errors (i.e. shutdown server -> shutdown loop)
+			$this->socket->on('connection', array($this, 'handleConnect'));
+			// /** @var ConnectionInterface $conn */
+			// $this->socket->on('connection', function ($conn) {
+			// 	echo "=> New connection (".$conn->getRemoteAddress().") ;)\n";
+			// });
+
+			$this->stdout("Server started\nListening on: ".$this->socket->getAddress()."\n");
+		}
+
+		/**
+		 * Triggered when a new connection is received from React
+		 * @param ConnectionInterface $conn
+		 */
+		public function handleConnect($conn) {
+			$this->stdout("New client with remote address '".$conn->getRemoteAddress()."' connected");
+			$this->connect($conn);
+
+			$conn->on('data', function ($data) use ($conn) {
+				$user = $this->getUserBySocket($conn);
+				if (!$user->handshake) {
+					$tmp = str_replace("\r", '', $data);
+					if (strpos($tmp, "\n\n") !== false) {
+						$this->doHandshake($user, $data);
+						$this->stdout("Doing handshake for user with id ".$user->id);
+					}
+				} else {
+					//split packet into frame and send it to deframe
+					$this->split_packet(strlen($data), $data, $user);
+				}
+				$this->process($user, $data);
+			});
+			$conn->on('close', function () use ($conn) {
+				$this->disconnect($this->getUserBySocket($conn));
+				$this->stderr("Client disconnected. TCP connection lost: ".$conn->getRemoteAddress());
+			});
+			$conn->on('error', function (\Exception $e) use ($conn) {
+				$this->stderr("Error");
+				$this->stderr($e->getMessage());
+				$this->stderr($e->getTraceAsString());
+
+				// $this->handleError($e, $conn);
+			});
 		}
 
 		abstract protected function process($user,$message); // Called immediately when the data is recieved.
@@ -53,7 +116,9 @@
 		public function send($user, $message, $message_type = 'text') {
 			if ($user->handshake) {
 				$message = $this->frame($message, $user, $message_type);
-				$result = @socket_write($user->socket, $message, strlen($message));
+				$this->bytesSent += mb_strlen($message, '8bit');
+
+				$user->socket->write($message);
 			}
 		}
 
@@ -78,70 +143,6 @@
 			// Core maintenance processes (e.g. retry sending failed messages)
 		}
 
-		/**
-		* Main processing loop
-		*/
-		public function run() {
-			if (empty($this->sockets)) {
-				$this->sockets['m'] = $this->master;
-			}
-			$read = $this->sockets;
-			$write = $except = null;
-			$this->_tick();
-			$this->tick();
-			@socket_select($read,$write,$except,1);
-
-			foreach ($read as $socket) {
-				if ($socket == $this->master) {
-					$client = socket_accept($socket);
-					if ($client < 0) {
-						$this->stderr("Failed: socket_accept()");
-						continue;
-					} else {
-						$this->connect($client);
-						$this->stdout("Client connected. " . $client);
-					}
-				} else {
-					$numBytes = @socket_recv($socket, $buffer, $this->maxBufferSize, 0);
-					if ($numBytes === false) {
-						$sockErrNo = socket_last_error($socket);
-						switch ($sockErrNo) {
-							case 102: // ENETRESET    -- Network dropped connection because of reset
-							case 103: // ECONNABORTED -- Software caused connection abort
-							case 104: // ECONNRESET   -- Connection reset by peer
-							case 108: // ESHUTDOWN    -- Cannot send after transport endpoint shutdown -- probably more of an error on our part, if we're trying to write after the socket is closed.  Probably not a critical error, though.
-							case 110: // ETIMEDOUT    -- Connection timed out
-							case 111: // ECONNREFUSED -- Connection refused -- We shouldn't see this one, since we're listening... Still not a critical error.
-							case 112: // EHOSTDOWN    -- Host is down -- Again, we shouldn't see this, and again, not critical because it's just one connection and we still want to listen to/for others.
-							case 113: // EHOSTUNREACH -- No route to host
-							case 121: // EREMOTEIO    -- Rempte I/O error -- Their hard drive just blew up.
-							case 125: // ECANCELED    -- Operation canceled
-								$this->stderr("Unusual disconnect on socket " . $socket);
-								$this->disconnect($socket, true, $sockErrNo); // disconnect before clearing error, in case someone with their own implementation wants to check for error conditions on the socket.
-								break;
-							default:
-								$this->stderr('Socket error: ' . socket_strerror($sockErrNo));
-						}
-					} else if ($numBytes == 0) {
-						$this->disconnect($socket);
-						$this->stderr("Client disconnected. TCP connection lost: " . $socket);
-					} else {
-						$user = $this->getUserBySocket($socket);
-						if (!$user->handshake) {
-							$tmp = str_replace("\r", '', $buffer);
-							if (strpos($tmp, "\n\n") === false ) {
-								continue; // If the client has not finished sending the header, then wait before sending our upgrade response.
-							}
-							$this->doHandshake($user,$buffer);
-						} else {
-							//split packet into frame and send it to deframe
-							$this->split_packet($numBytes,$buffer, $user);
-						}
-					}
-				}
-			}
-		}
-
 		protected function connect($socket) {
 			$user = new WebSocketUser(uniqid('u'), $socket);
 			$this->users[$user->id] = $user;
@@ -149,27 +150,33 @@
 			$this->connecting($user);
 		}
 
-		protected function disconnect($socket, $triggerClosed = true, $sockErrNo = null) {
-			$disconnectedUser = $this->getUserBySocket($socket);
-
-			if ($disconnectedUser !== null) {
-				unset($this->users[$disconnectedUser->id]);
-
-				if (array_key_exists($disconnectedUser->id, $this->sockets)) {
-					unset($this->sockets[$disconnectedUser->id]);
-				}
-
-				if (!is_null($sockErrNo)) {
-					socket_clear_error($socket);
-				}
-
+		protected function disconnect($user, $triggerClosed = true) {
+			if ($user !== null) {
 				if ($triggerClosed) {
-					$this->stdout("Client disconnected. ".$disconnectedUser->socket);
-					$this->closed($disconnectedUser);
-					socket_close($disconnectedUser->socket);
+					$this->stdout("Client with id ".$user->id." disconnected.");
 				} else {
 					$message = $this->frame('', $disconnectedUser, 'close');
-					@socket_write($disconnectedUser->socket, $message, strlen($message));
+					$this->bytesSent += mb_strlen($message, '8bit');
+					$user->socket->write($message);
+				}
+
+				// Unset user
+				if (array_key_exists($user->id, $this->users)) {
+					unset($this->users[$user->id]);
+				}
+
+				// Unset socket
+				if (array_key_exists($user->id, $this->sockets)) {
+					unset($this->sockets[$user->id]);
+				}
+
+				// Fire user closed event
+				$this->closed($user);
+
+				// End socket connection if necessary
+				if ($user->socket !== null) {
+					$user->socket->end();
+					$user->socket = null;
 				}
 			}
 		}
@@ -212,8 +219,9 @@
 
 			// Done verifying the _required_ headers and optionally required headers.
 			if (isset($handshakeResponse)) {
-				socket_write($user->socket,$handshakeResponse,strlen($handshakeResponse));
-				$this->disconnect($user->socket);
+				$this->bytesSent += mb_strlen($handshakeResponse, '8bit');
+				$user->socket->write($handshakeResponse);
+				$this->disconnect($user);
 				return;
 			}
 
@@ -235,7 +243,8 @@
 			$handshakeResponse .= "Upgrade: websocket\r\n";
 			$handshakeResponse .= "Connection: Upgrade\r\n";
 			$handshakeResponse .= "Sec-WebSocket-Accept: ".$handshakeToken.$subProtocol.$extensions."\r\n";
-			socket_write($user->socket, $handshakeResponse, strlen($handshakeResponse));
+
+			$user->socket->write($handshakeResponse);
 			$this->connected($user);
 		}
 
@@ -279,13 +288,13 @@
 
 		public function stdout($message) {
 			if ($this->interactive) {
-				echo $message.PHP_EOL;
+				echo "[WS][Info] ".$message.PHP_EOL;
 			}
 		}
 
 		public function stderr($message) {
 			if ($this->interactive) {
-				echo $message.PHP_EOL;
+				echo "[WS][Error] ".$message.PHP_EOL;
 			}
 		}
 
@@ -377,7 +386,7 @@
 
 				if (($message = $this->deframe($frame, $user,$headers)) !== FALSE) {
 					if ($user->hasSentClose) {
-						$this->disconnect($user->socket);
+						$this->disconnect($user);
 					} else {
 						if ((preg_match('//u', $message)) || ($headers['opcode']==2)) {
 							//$this->stdout("Text msg encoded UTF-8 or Binary msg\n".$message);
@@ -451,8 +460,9 @@
 			$payload = $user->partialMessage . $this->extractPayload($message,$headers);
 
 			if ($pongReply) {
-				$reply = $this->frame($payload,$user,'pong');
-				socket_write($user->socket,$reply,strlen($reply));
+				$reply = $this->frame($payload, $user, 'pong');
+				$this->bytesSent += mb_strlen($reply, '8bit');
+				$user->socket->write($reply);
 				return false;
 			}
 			if ($headers['length'] > strlen($this->applyMask($headers,$payload))) {
@@ -579,4 +589,12 @@
 			}
 			echo ")\n";
 		}
+
+		public function printStatistics() {
+			$this->stdout("=====   Websocket server   =====");
+			$this->stdout("> Connected users: ".strval(count($this->users)));
+			$this->stdout("> Open sockets: ".strval(count($this->sockets)));
+			$this->stdout("> Data sent:  ".number_format((($this->bytesSent / 1024) / 1024), 2)." MB");
+		}
+
 	}

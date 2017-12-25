@@ -1,9 +1,10 @@
+#!/usr/bin/env php
 <?php
 
 	namespace bbauer\CamToWeb;
 
 	use bbauer\CamToWeb\Server\BroadcastServer;
-	use bbauer\CamToWeb\Server\ServerTest;
+	use bbauer\CamToWeb\Server\WebSocketServer;
 	use Ratchet\Http\HttpServer;
 	use Ratchet\Server\IoServer;
 	use Ratchet\WebSocket\WsServer;
@@ -11,7 +12,6 @@
 	use React\ChildProcess\Process as ChildProcess;
 	use React\EventLoop\Factory as LoopFactory;
 	use React\Socket\ConnectionInterface;
-	use React\Socket\Server as SocketServer;
 
 	require dirname(__DIR__).'/vendor/autoload.php';
 
@@ -28,7 +28,7 @@
 		private $loop;
 		private $address = '0.0.0.0';
 		private $port = '8100';
-		private $ws_app;
+		private $ws_server;
 
 		// Some variables to speed up the checking process
 		private $learning = true;
@@ -52,11 +52,11 @@
 		/**
 		 * Construct the re-streaming service
 		 *
-		 * @param MessageComponentInterface ws_app the websocket app class
-		 * @param stirng port the port on which the websocket server should run on
+		 * @param string $address the ip address on which the server should run on
+		 * @param string $port the port on which the websocket server should run on
 		 */
-		public function __construct(MessageComponentInterface $ws_app, $port = '8100') {
-			$this->ws_app = $ws_app;
+		public function __construct($address = '0.0.0.0', $port = '8090') {
+			$this->address = $address;
 			$this->port = $port;
 			$this->lines_learning = array_pad([], $this->learning_cycles_necessary, 0);
 			$this->loop = LoopFactory::create();
@@ -82,60 +82,23 @@
 				$this->process($chunk);
 			});
 
+			$this->ffmpeg->stderr->on('data', function ($chunk) {
+				echo $chunk;
+			});
+
 			$this->ffmpeg->on('exit', function($exitCode, $termSignal) {
 				echo 'Process exited with code ' . $exitCode . PHP_EOL;
 			});
 		}
 
 		public function setupWebSocketServer($address, $port) {
-			$socket = new SocketServer($address.':'.$port, $this->loop);
-
-			// /** @var ConnectionInterface $conn */
-			// $socket->on('connection', function ($conn) {
-			// 	echo "=> New connection (".$conn->getRemoteAddress().") ;)\n";
-			// });
-			$socket->on('error', 'printf');
-
-			$server = new ServerTest($socket, $this->loop);
-
-			// $this->ioserver = new IoServer(
-			// 	new HttpServer(
-			// 		new WsServer(
-			// 			$this->ws_app
-			// 		)
-			// 	),
-			// 	$socket,
-			// 	$this->loop
-			// );
-
-			// try {
-			// 	$this->ws_app = new BroadcastServer($address, $port);
-			// 	$this->loop->addPeriodicTimer(0, function ($timer) {
-			// 		try {
-			// 			$this->ws_app->run();
-			// 		} catch (\Exception $e) {
-			// 			$this->ws_app->stdout($e->getMessage());
-			// 		}
-			// 	});
-			// } catch (\Exception $e) {
-			// 	echo "Exception:".PHP_EOL;
-			// 	echo $e->getMessage().PHP_EOL;
-			// }
-
-
-
-			// $this->ffmpeg = new ChildProcess($command);
-			// $this->ffmpeg->start($this->loop);
-			// $this->benchmark_start = time();
-			//
-			// $this->ffmpeg->stdout->on('data', function ($chunk) {
-			// 	$this->process($chunk);
-			// });
-			//
-			// $this->ffmpeg->on('exit', function($exitCode, $termSignal) {
-			// 	echo 'Process exited with code ' . $exitCode . PHP_EOL;
-			// });
-
+			try {
+				$this->ws_server = new BroadcastServer($this->loop, $address, $port);
+			} catch (\Exception $e) {
+				echo "Websocket server could not be started!".PHP_EOL;
+				echo "Exception:".PHP_EOL;
+				echo $e->getMessage().PHP_EOL;
+			}
 		}
 
 		public function setupMonitoring() {
@@ -156,6 +119,10 @@
 				echo "> End: ".$benchmark_end.PHP_EOL;
 				echo "> Elapsed: ".$time_elapsed." seconds".PHP_EOL;
 				echo "> FPS: ".floatval(floatval($this->image_count) / floatval($time_elapsed)).PHP_EOL;
+
+				$this->ws_server->printStatistics();
+
+				echo "=====   End Monitoring   =====".PHP_EOL;
 			});
 		}
 
@@ -213,9 +180,9 @@
 			// Assume that the image is valid (because of performance considerations)
 			$this->image_count++;
 			// Broadcast image over websocket server
-			// $this->ws_app->broadcastImage($this->image_buffer);
-			// $this->ws_app->broadcast('hello');
-			// $this->ws_app->broadcastBinary($this->image_buffer);
+			// $this->ws_server->broadcastImage($this->image_buffer);
+			// $this->ws_server->broadcast('hello');
+			$this->ws_server->broadcastBinary($this->image_buffer);
 
 			// Reset image buffer and start the next image
 			$this->image_buffer = '';
@@ -231,6 +198,10 @@
 			}
 		}
 
+		private function shutdown() {
+			// TODO shutdown all processes and exit script execution
+		}
+
 		public function run() {
 			if ($this->loop !== null) {
 				$this->loop->run();
@@ -242,26 +213,41 @@
 
 	}
 
+	// Start the re-streaming service from the command line with the given feed number
+	if (isset($argc) && isset($argv) && $argc > 1) {
+		// Check if the argument is between (incl.) 0 and 9
+		if (is_numeric($argv[1]) && intval($argv[1]) < 10 && intval($argv[1]) >= 0) {
 
+			$restream = new ReStream(
+				'0.0.0.0',
+				'809'.strval($argv[1])
+			);
+			$restream->setupMonitoring();
+			$restream->setupFFMPEG([
+				'-y',
+				'-rtsp_transport tcp', // tcp necessary for unifi cameras!
+				// '-rtsp_transport udp',
+				'-i rtsp://192.168.1.50:7447/5a2923899008e84d9919205f_2'
+				// '-i rtsp://184.72.239.149/vod/mp4:BigBuckBunny_175k.mov'
+				// '-i rtsp://r3---sn-4g5edney.googlevideo.com/Cj0LENy73wIaNAmnRgc5MOS6gRMYESARFC1UMkFaMOCoAUIASARgs6LZrYfe-uNXigELSDQzcTM3QWhOM28M/ADD58E42C4108CC327F1AA917366FDEE18817DE9.83B739BD30E35FBB57F85A0EEDB251F01E736EC2/yt6/1/video.3gp'
+			], [
+				'-an',
+				// '-q:v 1',
+				'-b:v 1000k',
+				'-vsync 0',
+				'-vf fps=fps=10', // 10 fps
+				'-hide_banner',
+				'-f image2',
+				'-updatefirst 1',
+				'pipe:1'
+			]);
+			$restream->run();
 
-	$restream = new ReStream(
-		new WebSocketServer(),
-		'8100'
-	);
-	$restream->setupMonitoring();
-	$restream->setupFFMPEG([
-		'-y',
-		'-rtsp_transport tcp',
-		'-i rtsp://192.168.1.50:7447/5a2923899008e84d9919205f_1' // rtsp://184.72.239.149/vod/mp4:BigBuckBunny_175k.mov
-	], [
-		'-an',
-		'-q:v 1',
-		'-b:v 1000k',
-		'-vsync 0',
-		'-vf fps=fps=10',
-		'-hide_banner',
-		'-f image2',
-		'-updatefirst 1',
-		'pipe:1'
-	]);
-	$restream->run();
+		} else {
+			echo "Invalid argument for 'feed_number' given! Must be an integer between (incl.) 0 and 9\n";
+			echo "Usage: ./ReStream.php <feed_number>\n";
+		}
+	} else {
+		echo "Invalid command usage!\n";
+		echo "Usage: ./ReStream.php <feed_number>\n";
+	}

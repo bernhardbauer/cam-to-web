@@ -1,7 +1,5 @@
 <?php
 
-	namespace bbauer\CamToWeb\Server;
-
 	/*
 		This websocket server is based on "PHP WebSockets (https://github.com/ghedipunk/PHP-Websockets)"
 
@@ -17,18 +15,13 @@
 		THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 	*/
 
+	namespace bbauer\CamToWeb\Server;
+
 	use bbauer\CamToWeb\Server\WebSocketUser;
-	use React\EventLoop\LoopInterface;
-	use React\Socket\ConnectionInterface;
-	use React\Socket\ServerInterface;
 
-	class ServerTest {
+	abstract class WebSocketServer {
 
-		/** @var LoopInterface $loop */
-		public $loop;
-		/** @var ServerInterface $socket */
-		public $socket;
-
+		protected $maxBufferSize;
 		protected $master;
 		protected $sockets                              = array();
 		protected $users                                = array();
@@ -37,104 +30,22 @@
 		protected $headerSecWebSocketProtocolRequired   = false;
 		protected $headerSecWebSocketExtensionsRequired = false;
 
-		/**
-		 * @param ServerInterface $socket
-		 * @param LoopInterface|null $loop
-		 */
-		public function __construct(ServerInterface $socket, LoopInterface $loop = null) {
-			if (strpos(PHP_VERSION, "hiphop") === false) {
-				gc_enable();
-			}
+		function __construct($addr, $port, $bufferLength = 2048) {
+			$this->maxBufferSize = $bufferLength;
+			$this->master = socket_create(AF_INET, SOCK_STREAM, SOL_TCP)  or die("Failed: socket_create()");
+			socket_set_option($this->master, SOL_SOCKET, SO_REUSEADDR, 1) or die("Failed: socket_option()");
+			socket_bind($this->master, $addr, $port)                      or die("Failed: socket_bind()");
+			socket_listen($this->master,20)                               or die("Failed: socket_listen()");
+			$this->sockets['m'] = $this->master;
 
-			set_time_limit(0);
-			ob_implicit_flush();
-			$this->loop = $loop;
-			$this->socket = $socket;
-			$socket->on('connection', array($this, 'handleConnect'));
-
-
-			$this->stdout("Server started\nListening on: ".$socket->getAddress()."\n");
+			$this->stdout("Server started\nListening on: $addr:$port\nMaster socket: ".$this->master);
 		}
 
-		/**
-		 * Triggered when a new connection is received from React
-		 * @param ConnectionInterface $conn
-		 */
-		public function handleConnect($conn) {
-			// $conn->decor = new IoConnection($conn);
-			// $conn->decor->resourceId = (int)$conn->stream;
-			// $uri = $conn->getRemoteAddress();
-			// $conn->decor->remoteAddress = trim(
-			// 	parse_url((strpos($uri, '://') === false ? 'tcp://' : '') . $uri, PHP_URL_HOST),
-			// 	'[]'
-			// );
-			// $this->app->onOpen($conn->decor);
-			echo "New client ".$conn->getRemoteAddress()." connected\n";
-			$this->connect($conn);
-
-			$conn->on('data', function ($data) use ($conn) {
-				echo "Data received\n";
-
-				$user = $this->getUserBySocket($conn);
-				if (!$user->handshake) {
-					$tmp = str_replace("\r", '', $data);
-					if (strpos($tmp, "\n\n") !== false) {
-						$this->doHandshake($user, $data);
-					}
-				} else {
-					//split packet into frame and send it to deframe
-					$this->split_packet(strlen($data), $data, $user);
-				}
-				// $this->handleData($data, $conn);
-			});
-			$conn->on('close', function () use ($conn) {
-				echo "Connection close\n";
-				$this->stderr("Client disconnected. TCP connection lost: ".$conn->getRemoteAddress());
-				// $this->handleEnd($conn);
-			});
-			$conn->on('error', function (\Exception $e) use ($conn) {
-				echo "Error\n";
-				echo $e->getMessage().PHP_EOL;
-				echo $e->getTraceAsString().PHP_EOL;
-				// $this->handleError($e, $conn);
-
-
-
-
-
-				// $sockErrNo = socket_last_error($socket);
-				// switch ($sockErrNo) {
-				// 	case 102: // ENETRESET    -- Network dropped connection because of reset
-				// 	case 103: // ECONNABORTED -- Software caused connection abort
-				// 	case 104: // ECONNRESET   -- Connection reset by peer
-				// 	case 108: // ESHUTDOWN    -- Cannot send after transport endpoint shutdown -- probably more of an error on our part, if we're trying to write after the socket is closed.  Probably not a critical error, though.
-				// 	case 110: // ETIMEDOUT    -- Connection timed out
-				// 	case 111: // ECONNREFUSED -- Connection refused -- We shouldn't see this one, since we're listening... Still not a critical error.
-				// 	case 112: // EHOSTDOWN    -- Host is down -- Again, we shouldn't see this, and again, not critical because it's just one connection and we still want to listen to/for others.
-				// 	case 113: // EHOSTUNREACH -- No route to host
-				// 	case 121: // EREMOTEIO    -- Rempte I/O error -- Their hard drive just blew up.
-				// 	case 125: // ECANCELED    -- Operation canceled
-				// 		$this->stderr("Unusual disconnect on socket " . $socket);
-				// 		$this->disconnect($socket, true, $sockErrNo); // disconnect before clearing error, in case someone with their own implementation wants to check for error conditions on the socket.
-				// 		break;
-				// 	default:
-				// 		$this->stderr('Socket error: ' . socket_strerror($sockErrNo));
-				// }
-			});
-		}
-
-		protected function process($user,$message) {
-			echo "process called\n";
-		}
-		protected function connected($user) {
-			echo "connected called\n";
-		}
-		protected function closed($user) {
-			echo "closed called\n";
-		}
+		abstract protected function process($user,$message); // Called immediately when the data is recieved.
+		abstract protected function connected($user);        // Called after the handshake response is sent to the client.
+		abstract protected function closed($user);           // Called after the connection is closed.
 
 		protected function connecting($user) {
-			echo "connecting called\n";
 			// Override to handle a connecting user, after the instance of the User is created, but before
 			// the handshake has completed.
 		}
@@ -165,6 +76,70 @@
 
 		protected function _tick() {
 			// Core maintenance processes (e.g. retry sending failed messages)
+		}
+
+		/**
+		* Main processing loop
+		*/
+		public function run() {
+			if (empty($this->sockets)) {
+				$this->sockets['m'] = $this->master;
+			}
+			$read = $this->sockets;
+			$write = $except = null;
+			$this->_tick();
+			$this->tick();
+			@socket_select($read,$write,$except,1);
+
+			foreach ($read as $socket) {
+				if ($socket == $this->master) {
+					$client = socket_accept($socket);
+					if ($client < 0) {
+						$this->stderr("Failed: socket_accept()");
+						continue;
+					} else {
+						$this->connect($client);
+						$this->stdout("Client connected. " . $client);
+					}
+				} else {
+					$numBytes = @socket_recv($socket, $buffer, $this->maxBufferSize, 0);
+					if ($numBytes === false) {
+						$sockErrNo = socket_last_error($socket);
+						switch ($sockErrNo) {
+							case 102: // ENETRESET    -- Network dropped connection because of reset
+							case 103: // ECONNABORTED -- Software caused connection abort
+							case 104: // ECONNRESET   -- Connection reset by peer
+							case 108: // ESHUTDOWN    -- Cannot send after transport endpoint shutdown -- probably more of an error on our part, if we're trying to write after the socket is closed.  Probably not a critical error, though.
+							case 110: // ETIMEDOUT    -- Connection timed out
+							case 111: // ECONNREFUSED -- Connection refused -- We shouldn't see this one, since we're listening... Still not a critical error.
+							case 112: // EHOSTDOWN    -- Host is down -- Again, we shouldn't see this, and again, not critical because it's just one connection and we still want to listen to/for others.
+							case 113: // EHOSTUNREACH -- No route to host
+							case 121: // EREMOTEIO    -- Rempte I/O error -- Their hard drive just blew up.
+							case 125: // ECANCELED    -- Operation canceled
+								$this->stderr("Unusual disconnect on socket " . $socket);
+								$this->disconnect($socket, true, $sockErrNo); // disconnect before clearing error, in case someone with their own implementation wants to check for error conditions on the socket.
+								break;
+							default:
+								$this->stderr('Socket error: ' . socket_strerror($sockErrNo));
+						}
+					} else if ($numBytes == 0) {
+						$this->disconnect($socket);
+						$this->stderr("Client disconnected. TCP connection lost: " . $socket);
+					} else {
+						$user = $this->getUserBySocket($socket);
+						if (!$user->handshake) {
+							$tmp = str_replace("\r", '', $buffer);
+							if (strpos($tmp, "\n\n") === false ) {
+								continue; // If the client has not finished sending the header, then wait before sending our upgrade response.
+							}
+							$this->doHandshake($user,$buffer);
+						} else {
+							//split packet into frame and send it to deframe
+							$this->split_packet($numBytes,$buffer, $user);
+						}
+					}
+				}
+			}
 		}
 
 		protected function connect($socket) {
@@ -260,8 +235,7 @@
 			$handshakeResponse .= "Upgrade: websocket\r\n";
 			$handshakeResponse .= "Connection: Upgrade\r\n";
 			$handshakeResponse .= "Sec-WebSocket-Accept: ".$handshakeToken.$subProtocol.$extensions."\r\n";
-
-			$user->socket->write($handshakeResponse);
+			socket_write($user->socket, $handshakeResponse, strlen($handshakeResponse));
 			$this->connected($user);
 		}
 
@@ -605,5 +579,4 @@
 			}
 			echo ")\n";
 		}
-
 	}
