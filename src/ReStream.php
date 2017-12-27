@@ -27,8 +27,9 @@
 		private $ffmpeg;
 		private $loop;
 		private $address = '0.0.0.0';
-		private $port = '8100';
+		private $port = '8090';
 		private $ws_server;
+		private $shutdown = false; // If true prevents start of the loop and processes
 
 		// Some variables to speed up the checking process
 		private $learning = true;
@@ -71,6 +72,11 @@
 		 * @param array output parameters for the ffmpeg service
 		 */
 		public function setupFFMPEG(array $input, array $output) {
+			if ($this->shutdown === true) {
+				echo "Could not start FFMPEG process as the service is in shutdown mode!\n";
+				return;
+			}
+
 			$command = 'ffmpeg '.implode(' ', $input).' '.implode(' ', $output);
 			echo $command."\n";
 
@@ -92,16 +98,27 @@
 		}
 
 		public function setupWebSocketServer($address, $port) {
+			if ($this->shutdown === true) {
+				echo "Could not start the WebSocket server as the service is in shutdown mode!\n";
+				return;
+			}
+
 			try {
 				$this->ws_server = new BroadcastServer($this->loop, $address, $port);
 			} catch (\Exception $e) {
-				echo "Websocket server could not be started!".PHP_EOL;
-				echo "Exception:".PHP_EOL;
-				echo $e->getMessage().PHP_EOL;
+				echo "Websocket server could not be started! (Message: ".$e->getMessage()."; Stacktrace: ".$e->getTraceAsString().")".PHP_EOL;
+
+				// Shutdown all processes and end the event loop
+				$this->shutdown();
 			}
 		}
 
 		public function setupMonitoring() {
+			if ($this->shutdown === true) {
+				echo "Could not setup monitoring as the service is in shutdown mode!\n";
+				return;
+			}
+
 			$this->memory_timer = $this->loop->addPeriodicTimer(10, function () {
 				$memory_usage = number_format(((memory_get_usage(true) / 1024) / 1024), 2); // MB
 				$memory_peak_usage = number_format(((memory_get_peak_usage(true) / 1024) / 1024), 2); // MB
@@ -120,7 +137,9 @@
 				echo "> Elapsed: ".$time_elapsed." seconds".PHP_EOL;
 				echo "> FPS: ".floatval(floatval($this->image_count) / floatval($time_elapsed)).PHP_EOL;
 
-				$this->ws_server->printStatistics();
+				if ($this->ws_server !== null) {
+					$this->ws_server->printStatistics();
+				}
 
 				echo "=====   End Monitoring   =====".PHP_EOL;
 			});
@@ -180,9 +199,9 @@
 			// Assume that the image is valid (because of performance considerations)
 			$this->image_count++;
 			// Broadcast image over websocket server
-			// $this->ws_server->broadcastImage($this->image_buffer);
-			// $this->ws_server->broadcast('hello');
-			$this->ws_server->broadcastBinary($this->image_buffer);
+			if ($this->ws_server !== null) {
+				$this->ws_server->broadcastBinary($this->image_buffer);
+			}
 
 			// Reset image buffer and start the next image
 			$this->image_buffer = '';
@@ -200,6 +219,17 @@
 
 		private function shutdown() {
 			// TODO shutdown all processes and exit script execution
+			$this->shutdown = true;
+
+			// Terminate the ffmpeg process
+			if ($this->ffmpeg !== null) {
+				$this->ffmpeg->terminate();
+			}
+
+			// Stop the event loop
+			if ($this->loop !== null) {
+				$this->loop->stop();
+			}
 		}
 
 		public function run() {
@@ -214,13 +244,13 @@
 	}
 
 	// Start the re-streaming service from the command line with the given feed number
-	if (isset($argc) && isset($argv) && $argc > 1) {
+	if (isset($argc) && isset($argv) && $argc >= 3) { // min 2 arguments -> argc starts with 1 (first argument = filename)
 		// Check if the argument is between (incl.) 0 and 9
-		if (is_numeric($argv[1]) && intval($argv[1]) < 10 && intval($argv[1]) >= 0) {
+		if (is_numeric($argv[2]) && intval($argv[2]) < 10 && intval($argv[2]) >= 0) {
 
 			$restream = new ReStream(
 				'0.0.0.0',
-				'809'.strval($argv[1])
+				'809'.strval($argv[2])
 			);
 			$restream->setupMonitoring();
 			$restream->setupFFMPEG([
@@ -243,11 +273,12 @@
 			]);
 			$restream->run();
 
+			echo "Re-streaming service started on port ".'809'.strval($argv[2]).".";
 		} else {
 			echo "Invalid argument for 'feed_number' given! Must be an integer between (incl.) 0 and 9\n";
-			echo "Usage: ./ReStream.php <feed_number>\n";
+			echo "Usage: ./ReStream.php <input_rtsp_url> <feed_number>\n";
 		}
 	} else {
 		echo "Invalid command usage!\n";
-		echo "Usage: ./ReStream.php <feed_number>\n";
+		echo "Usage: ./ReStream.php <input_rtsp_url> <feed_number>\n";
 	}

@@ -1,94 +1,58 @@
 <html>
-    <head>
-        <title>TEST</title>
-        <meta charset="UTF-8">
+	<head>
+		<title>TEST</title>
+		<meta charset="UTF-8">
 		<script src="js/jpg.js" charset="utf-8"></script>
-    </head>
-    <body>
-        <!-- <video id="videoElement" autoplay></video><br> -->
+	</head>
+	<body>
 		<canvas id="myCanvas" width="600" height="600" style="max-width:600px;max-height:400px;"></canvas>
-		<canvas id="myCanvas2" width="600" height="600" style="max-width:600px;max-height:400px;"></canvas>
-        <script>
-			var c = document.getElementById("myCanvas");
-			var ctx = c.getContext("2d");
 
-			ws = new WebSocket('ws://127.0.0.1:8090');
+		<script>
+			var c = document.getElementById("myCanvas");
+			var parser = new JpegDecoder();
+
+			ws = new WebSocket('ws://192.168.1.50:8091');
 			ws.binaryType = 'arraybuffer';
 
 			ws.onopen = function () {
 				console.log('Websocket connection opened on url "'+ws.URL+'"');
-				// console.log(ws);
 			}
 
 			//setup the handler for when data arrives via WS
 			ws.onmessage = function (msg) {
-				// console.log(msg.data);
-				// console.log('test', msg.data.substr(0, 20));
-				// console.log(_base64ToArrayBuffer(msg.data));
-
-				// var arrayView = convertBinaryStringToUint8Array(atob(msg.data));
-
-				var image_data = new Uint8Array(msg.data);
-				decodeImage("myCanvas", image_data);
-
-				var canvas = document.getElementById("myCanvas2");
-				var ctx = canvas.getContext('2d');
-				var imgData = ctx.createImageData(100,100);
-				for (var i=0; i<image_data.length; i+=4) {
-					imgData.data[i+0] = image_data[i];
-					imgData.data[i+1] = image_data[i+1];
-					imgData.data[i+2] = image_data[i+2];
-					imgData.data[i+3] = image_data[i+3];
-				}
-				ctx.putImageData(imgData,10,10);
+				decodeImage(c, new Uint8Array(msg.data));
 			};
 
+			/**
+			 * Decodes an image and renders it onto the canvas element
+			 *
+			 * @param DOMElement canvas
+			 * @param Uint8Array encoded
+			 */
+			function decodeImage(canvas, encoded) {
+				try {
+					parser.parse(encoded);
+					var width = parser.width;
+					var height = parser.height;
+					var numComponents = parser.numComponents;
+					var decoded = parser.getData(width, height);
 
-
-			function decodeImage(canvasId, encoded) {
-				var parser = new JpegDecoder();
-				parser.parse(encoded);
-				var width = parser.width;
-				var height = parser.height;
-				var numComponents = parser.numComponents;
-				var decoded = parser.getData(width, height);
-
-
-				var canvas = document.getElementById(canvasId);
-				canvas.width = width;
-				canvas.height = height;
-				var ctx = canvas.getContext('2d');
-				var imageData = ctx.createImageData(width, height);
-				var imageBytes = imageData.data;
-				for (var i = 0, j = 0, ii = width * height * 4; i < ii; ) {
-					imageBytes[i++] = decoded[j++];
-					imageBytes[i++] = numComponents === 3 ? decoded[j++] : decoded[j - 1];
-					imageBytes[i++] = numComponents === 3 ? decoded[j++] : decoded[j - 1];
-					imageBytes[i++] = 255;
+					canvas.width = width;
+					canvas.height = height;
+					var ctx = canvas.getContext('2d');
+					var imageData = ctx.createImageData(width, height);
+					var imageBytes = imageData.data;
+					for (var i = 0, j = 0, ii = width * height * 4; i < ii; ) {
+						imageBytes[i++] = decoded[j++];
+						imageBytes[i++] = numComponents === 3 ? decoded[j++] : decoded[j - 1];
+						imageBytes[i++] = numComponents === 3 ? decoded[j++] : decoded[j - 1];
+						imageBytes[i++] = 255;
+					}
+					ctx.putImageData(imageData, 0, 0);
+				} catch (e) {
+					console.log('Could not decode image data', e);
 				}
-				ctx.putImageData(imageData, 0, 0);
 			}
-
-
-			function convertBinaryStringToUint8Array(bStr) {
-				var i, len = bStr.length, u8_array = new Uint8Array(len);
-				for (var i = 0; i < len; i++) {
-					u8_array[i] = bStr.charCodeAt(i);
-				}
-				return u8_array;
-			}
-
-
-			function _base64ToArrayBuffer(base64) {
-				var binary_string =  window.atob(base64);
-				// console.log(binary_string);
-				var len = binary_string.length;
-				var bytes = new Uint8Array(len);
-				for (var i = 0; i < len; i++) {
-					bytes[i] = binary_string.charCodeAt(i);
-				}
-				return bytes.buffer;
-			}
-        </script>
-    </body>
+		</script>
+	</body>
 </html>

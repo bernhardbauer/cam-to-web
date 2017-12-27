@@ -115,10 +115,16 @@
 
 		public function send($user, $message, $message_type = 'text') {
 			if ($user->handshake) {
-				$message = $this->frame($message, $user, $message_type);
-				$this->bytesSent += mb_strlen($message, '8bit');
+				if ($user->socket !== null) {
+					$message = $this->frame($message, $user, $message_type);
+					$this->bytesSent += mb_strlen($message, '8bit');
 
-				$user->socket->write($message);
+					$user->socket->write($message);
+					return true;
+				} else {
+					$this->disconnect($user);
+					return false;
+				}
 			}
 		}
 
@@ -152,9 +158,13 @@
 
 		protected function disconnect($user, $triggerClosed = true) {
 			if ($user !== null) {
+				if ($user->socket === null) {
+					$this->stderr('Disconnection user with id '.$user->id.' which has a "null" as socket!');
+				}
+
 				if ($triggerClosed) {
 					$this->stdout("Client with id ".$user->id." disconnected.");
-				} else {
+				} else if ($user->socket !== null) {
 					$message = $this->frame('', $disconnectedUser, 'close');
 					$this->bytesSent += mb_strlen($message, '8bit');
 					$user->socket->write($message);
@@ -219,8 +229,10 @@
 
 			// Done verifying the _required_ headers and optionally required headers.
 			if (isset($handshakeResponse)) {
-				$this->bytesSent += mb_strlen($handshakeResponse, '8bit');
-				$user->socket->write($handshakeResponse);
+				if ($user->socket !== null) {
+					$this->bytesSent += mb_strlen($handshakeResponse, '8bit');
+					$user->socket->write($handshakeResponse);
+				}
 				$this->disconnect($user);
 				return;
 			}
@@ -244,8 +256,14 @@
 			$handshakeResponse .= "Connection: Upgrade\r\n";
 			$handshakeResponse .= "Sec-WebSocket-Accept: ".$handshakeToken.$subProtocol.$extensions."\r\n";
 
-			$user->socket->write($handshakeResponse);
-			$this->connected($user);
+			// If the socket != null send a handshake response
+			if ($user->socket !== null) {
+				$this->bytesSent += mb_strlen($handshakeResponse, '8bit');
+				$user->socket->write($handshakeResponse);
+				$this->connected($user);
+			} else {
+				$this->disconnect($user);
+			}
 		}
 
 		protected function checkHost($hostName) {
@@ -460,9 +478,11 @@
 			$payload = $user->partialMessage . $this->extractPayload($message,$headers);
 
 			if ($pongReply) {
-				$reply = $this->frame($payload, $user, 'pong');
-				$this->bytesSent += mb_strlen($reply, '8bit');
-				$user->socket->write($reply);
+				if ($user->socket !== null) {
+					$reply = $this->frame($payload, $user, 'pong');
+					$this->bytesSent += mb_strlen($reply, '8bit');
+					$user->socket->write($reply);
+				}
 				return false;
 			}
 			if ($headers['length'] > strlen($this->applyMask($headers,$payload))) {
