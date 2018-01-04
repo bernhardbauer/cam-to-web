@@ -73,7 +73,7 @@
 		 */
 		public function setupFFMPEG(array $input, array $output) {
 			if ($this->shutdown === true) {
-				echo "Could not start FFMPEG process as the service is in shutdown mode!\n";
+				echo "[ReStream][Error] Could not start FFMPEG process as the service is in shutdown mode!\n";
 				return;
 			}
 
@@ -93,55 +93,56 @@
 			});
 
 			$this->ffmpeg->on('exit', function($exitCode, $termSignal) {
-				echo 'Process exited with code ' . $exitCode . PHP_EOL;
+				echo '[ReStream][Error] Process exited with code ' . $exitCode . PHP_EOL;
 			});
 		}
 
 		public function setupWebSocketServer($address, $port) {
 			if ($this->shutdown === true) {
-				echo "Could not start the WebSocket server as the service is in shutdown mode!\n";
+				echo "[ReStream][Error] Could not start the WebSocket server as the service is in shutdown mode!\n";
 				return;
 			}
 
 			try {
 				$this->ws_server = new BroadcastServer($this->loop, $address, $port);
 			} catch (\Exception $e) {
-				echo "Websocket server could not be started! (Message: ".$e->getMessage()."; Stacktrace: ".$e->getTraceAsString().")".PHP_EOL;
+				echo "[ReStream][Error] Websocket server could not be started! (Message: ".$e->getMessage()."; Stacktrace: ".$e->getTraceAsString().")".PHP_EOL;
 
 				// Shutdown all processes and end the event loop
 				$this->shutdown();
 			}
 		}
 
-		public function setupMonitoring() {
+		public function setupMonitoring($period = 60) {
 			if ($this->shutdown === true) {
-				echo "Could not setup monitoring as the service is in shutdown mode!\n";
+				echo "[ReStream][Error] Could not setup monitoring as the service is in shutdown mode!\n";
 				return;
 			}
 
-			$this->memory_timer = $this->loop->addPeriodicTimer(10, function () {
+			$this->memory_timer = $this->loop->addPeriodicTimer($period, function () {
 				$memory_usage = number_format(((memory_get_usage(true) / 1024) / 1024), 2); // MB
 				$memory_peak_usage = number_format(((memory_get_peak_usage(true) / 1024) / 1024), 2); // MB
 
-				echo "=====   Memory usage   =====".PHP_EOL;
-				echo "> Now:  ".$memory_usage." MB".PHP_EOL;
-				echo "> Peak: ".$memory_peak_usage." MB".PHP_EOL;
+				echo "[ReStream] =====   Memory usage   =====".PHP_EOL;
+				echo "[ReStream] Now:  ".$memory_usage." MB".PHP_EOL;
+				echo "[ReStream] Peak: ".$memory_peak_usage." MB".PHP_EOL;
 
 
-				echo "=====   Benchmark Results   =====".PHP_EOL;
+				echo "[ReStream] =====   Benchmark Results   =====".PHP_EOL;
 				$benchmark_end = time();
 				$time_elapsed = (intval($benchmark_end) - intval($this->benchmark_start));
-				echo "> Images: ".$this->image_count.PHP_EOL;
-				echo "> Start: ".$this->benchmark_start.PHP_EOL;
-				echo "> End: ".$benchmark_end.PHP_EOL;
-				echo "> Elapsed: ".$time_elapsed." seconds".PHP_EOL;
-				echo "> FPS: ".floatval(floatval($this->image_count) / floatval($time_elapsed)).PHP_EOL;
+				echo "[ReStream] Images: ".$this->image_count.PHP_EOL;
+				echo "[ReStream] Start: ".$this->benchmark_start.PHP_EOL;
+				echo "[ReStream] End: ".$benchmark_end.PHP_EOL;
+				echo "[ReStream] Elapsed: ".$time_elapsed." seconds".PHP_EOL;
+				echo "[ReStream] FPS: ".floatval(floatval($this->image_count) / floatval($time_elapsed)).PHP_EOL;
 
+				// Print websocket server statistics
 				if ($this->ws_server !== null) {
 					$this->ws_server->printStatistics();
 				}
 
-				echo "=====   End Monitoring   =====".PHP_EOL;
+				echo "[ReStream] =====   End Monitoring   =====".PHP_EOL;
 			});
 		}
 
@@ -213,7 +214,7 @@
 			if ($this->learning && $this->learning_cycle >= $this->learning_cycles_necessary) {
 				$this->learning = false;
 				$this->lines_to_skip = max((min($this->lines_learning) - 15), 0);
-				echo "Learning finished with learning cycle $this->learning_cycle. Learned skip value is $this->lines_to_skip\n";
+				echo "[ReStream][Info] Learning finished with learning cycle $this->learning_cycle. Learned skip value is $this->lines_to_skip\n";
 			}
 		}
 
@@ -232,13 +233,15 @@
 			}
 		}
 
+		/**
+		 * Run the event loop if it has been set up
+		 */
 		public function run() {
 			if ($this->loop !== null) {
 				$this->loop->run();
 			} else {
-				echo "[Critical] Could not start event loop!".PHP_EOL;
+				echo "[ReStream][Critical] Could not start event loop!".PHP_EOL;
 			}
-			// $this->ioserver->run(); // Runs the react event loop
 		}
 
 	}
@@ -254,15 +257,14 @@
 			);
 			$restream->setupMonitoring();
 			$restream->setupFFMPEG([
+				'-loglevel repeat+warning', // Sets the log level to warning + the repeat option specifies that no output should be overwritten
 				'-y',
 				'-rtsp_transport tcp', // tcp necessary for unifi cameras!
-				// '-rtsp_transport udp',
 				'-i rtsp://192.168.1.50:7447/5a2923899008e84d9919205f_2'
 				// '-i rtsp://184.72.239.149/vod/mp4:BigBuckBunny_175k.mov'
-				// '-i rtsp://r3---sn-4g5edney.googlevideo.com/Cj0LENy73wIaNAmnRgc5MOS6gRMYESARFC1UMkFaMOCoAUIASARgs6LZrYfe-uNXigELSDQzcTM3QWhOM28M/ADD58E42C4108CC327F1AA917366FDEE18817DE9.83B739BD30E35FBB57F85A0EEDB251F01E736EC2/yt6/1/video.3gp'
 			], [
 				'-an',
-				// '-q:v 1',
+				// '-q:v 1', // Video quality
 				'-b:v 1000k',
 				'-vsync 0',
 				'-vf fps=fps=10', // 10 fps
