@@ -94,6 +94,9 @@
 
 			$this->ffmpeg->on('exit', function($exitCode, $termSignal) {
 				echo '[ReStream][Error] Process exited with code ' . $exitCode . PHP_EOL;
+
+				// Shutdown all processes and end the event loop
+				$this->shutdown();
 			});
 		}
 
@@ -231,6 +234,8 @@
 			if ($this->loop !== null) {
 				$this->loop->stop();
 			}
+
+			die("[ReStream] Shutdown completed\n");
 		}
 
 		/**
