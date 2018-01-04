@@ -249,8 +249,13 @@
 	// Start the re-streaming service from the command line with the given feed number
 	if (isset($argc) && isset($argv) && $argc >= 3) { // min 2 arguments -> argc starts with 1 (first argument = filename)
 		// Check if the argument is between (incl.) 0 and 9
-		if (is_numeric($argv[2]) && intval($argv[2]) < 10 && intval($argv[2]) >= 0) {
-
+		if (!is_numeric($argv[2]) || intval($argv[2]) < 0 || intval($argv[2]) >= 10) {
+			echo "Invalid argument for 'feed_number' given! Must be an integer between (incl.) 0 and 9\n";
+			echo "Usage: ./ReStream.php <input_rtsp_url> <feed_number>\n";
+		} else if (empty($argv[1]) || strpos($argv[1], "rtsp://") !== 0) {
+			echo "Invalid argument for 'input_rtsp_url' given! Must be an rtsp url and start with 'rtsp://'!\n";
+			echo "Usage: ./ReStream.php <input_rtsp_url> <feed_number>\n";
+		} else {
 			$restream = new ReStream(
 				'0.0.0.0',
 				'809'.strval($argv[2])
@@ -260,8 +265,7 @@
 				'-loglevel repeat+warning', // Sets the log level to warning + the repeat option specifies that no output should be overwritten
 				'-y',
 				'-rtsp_transport tcp', // tcp necessary for unifi cameras!
-				'-i rtsp://192.168.1.50:7447/5a2923899008e84d9919205f_2'
-				// '-i rtsp://184.72.239.149/vod/mp4:BigBuckBunny_175k.mov'
+				'-i '.$argv[1] // '-i rtsp://184.72.239.149/vod/mp4:BigBuckBunny_175k.mov'
 			], [
 				'-an',
 				// '-q:v 1', // Video quality
@@ -276,9 +280,6 @@
 			$restream->run();
 
 			echo "Re-streaming service started on port ".'809'.strval($argv[2]).".";
-		} else {
-			echo "Invalid argument for 'feed_number' given! Must be an integer between (incl.) 0 and 9\n";
-			echo "Usage: ./ReStream.php <input_rtsp_url> <feed_number>\n";
 		}
 	} else {
 		echo "Invalid command usage!\n";
