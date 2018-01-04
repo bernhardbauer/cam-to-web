@@ -66,7 +66,7 @@
 			// 	echo "=> New connection (".$conn->getRemoteAddress().") ;)\n";
 			// });
 
-			$this->stdout("Server started\nListening on: ".$this->socket->getAddress()."\n");
+			$this->stdout("Server started -> Listening on: ".$this->socket->getAddress());
 		}
 
 		/**

@@ -73,12 +73,12 @@
 		 */
 		public function setupFFMPEG(array $input, array $output) {
 			if ($this->shutdown === true) {
-				echo "[ReStream][Error] Could not start FFMPEG process as the service is in shutdown mode!\n";
+				echo "[ffmpeg][Error] Could not start FFMPEG process as the service is in shutdown mode!\n";
 				return;
 			}
 
 			$command = 'ffmpeg '.implode(' ', $input).' '.implode(' ', $output);
-			echo $command."\n";
+			echo "[ffmpeg][Info] Command: ".$command."\n";
 
 			$this->ffmpeg = new ChildProcess($command);
 			$this->ffmpeg->start($this->loop);
@@ -89,11 +89,11 @@
 			});
 
 			$this->ffmpeg->stderr->on('data', function ($chunk) {
-				echo $chunk;
+				echo "[ffmpeg][Error] ".$chunk;
 			});
 
 			$this->ffmpeg->on('exit', function($exitCode, $termSignal) {
-				echo '[ReStream][Error] Process exited with code ' . $exitCode . PHP_EOL;
+				echo '[ffmpeg][Error] Process exited with code ' . $exitCode . PHP_EOL;
 
 				// Shutdown all processes and end the event loop
 				$this->shutdown();
