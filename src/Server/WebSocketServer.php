@@ -306,13 +306,13 @@
 
 		public function stdout($message) {
 			if ($this->interactive) {
-				echo "[WS][Info] ".$message.PHP_EOL;
+				fwrite(STDOUT, "[WS][Info] ".$message.PHP_EOL);
 			}
 		}
 
 		public function stderr($message) {
 			if ($this->interactive) {
-				echo "[WS][Error] ".$message.PHP_EOL;
+				fwrite(STDERR, "[WS][Error] ".$message.PHP_EOL);
 			}
 		}
 
