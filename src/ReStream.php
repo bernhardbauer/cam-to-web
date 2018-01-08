@@ -109,9 +109,9 @@
 
 			$this->ffmpeg->on('exit', function($exitCode, $termSignal) {
 				if ($exitCode !== null) {
-					$this->stderr('Process exited with code "'.strval($exitCode).'"');
+					$this->stderr('FFMPEG Process exited with code "'.strval($exitCode).'"');
 				} else {
-					$this->stderr('Process has been terminated with code "'.strval($termSignal).'"');
+					$this->stderr('FFMPEG Process has been terminated with code "'.strval($termSignal).'"');
 				}
 
 
@@ -129,7 +129,7 @@
 			try {
 				$this->ws_server = new BroadcastServer($this->loop, $address, $port);
 			} catch (\Exception $e) {
-				echo "[ReStream][Error] Websocket server could not be started! (Message: ".$e->getMessage()."; Stacktrace: ".$e->getTraceAsString().")".PHP_EOL;
+				$this->stderr("Websocket server could not be started! (Message: ".$e->getMessage()."; Stacktrace: ".$e->getTraceAsString().")");
 
 				// Shutdown all processes and end the event loop
 				$this->shutdown();
@@ -138,7 +138,6 @@
 
 		public function setupMonitoring($period = 60) {
 			if ($this->shutdown === true) {
-				echo "[ReStream][Error] \n";
 				$this->stderr("Could not setup monitoring as the service is in shutdown mode!");
 				return;
 			}
