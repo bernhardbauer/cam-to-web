@@ -50,6 +50,10 @@
 		// Memory monitoring
 		private $memory_timer;
 
+		// Watchdog
+		private $wdt = 0;
+		private $react_wdt_timer; // Watchdog timer from React
+
 		/**
 		 * Construct the re-streaming service
 		 *
@@ -63,6 +67,17 @@
 			$this->loop = LoopFactory::create();
 
 			$this->setupWebSocketServer($this->address, $this->port);
+
+			$this->react_wdt_timer = $this->loop->addPeriodicTimer(1, function () {
+				if ($this->wdt > 0) {
+					// Shutdown script if the watchdog timer has not been updated in the last 10 seconds
+					if ($this->wdt < (time() - 10)) {
+						$this->stderr("Watchdog call! Shutting down process because the timer has not been updated.");
+						$this->shutdown();
+					}
+				}
+			});
+			$this->wdt = time();
 		}
 
 		/**
@@ -204,6 +219,7 @@
 			$this->image_count++;
 			// Broadcast image over websocket server
 			if ($this->ws_server !== null) {
+				$this->wdt = time(); // Update the watchdog time
 				$this->ws_server->broadcastBinary($this->image_buffer);
 			}
 
@@ -236,6 +252,10 @@
 			}
 
 			die("[ReStream] Shutdown completed\n");
+		}
+
+		private function isShutdown() {
+			return $this->shutdown;
 		}
 
 		/**
@@ -273,7 +293,7 @@
 				'-i '.$argv[1] // '-i rtsp://184.72.239.149/vod/mp4:BigBuckBunny_175k.mov'
 			], [
 				'-an',
-				// '-q:v 1', // Video quality
+				'-q:v 2', // Video quality (best = 1)
 				'-b:v 1000k',
 				'-vsync 0',
 				'-vf fps=fps=10', // 10 fps
@@ -284,7 +304,11 @@
 			]);
 			$restream->run();
 
-			echo "Re-streaming service started on port ".'809'.strval($argv[2]).".";
+			if (!$restream->isShutdown()) {
+				echo "Re-streaming service started on port ".'809'.strval($argv[2]).".";
+			} else {
+				echo "Re-streaming service is in shutdown mode!";
+			}
 		}
 	} else {
 		echo "Invalid command usage!\n";
