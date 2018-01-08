@@ -88,12 +88,12 @@
 		 */
 		public function setupFFMPEG(array $input, array $output) {
 			if ($this->shutdown === true) {
-				echo "[ffmpeg][Error] Could not start FFMPEG process as the service is in shutdown mode!\n";
+				$this->stderr("Could not start FFMPEG process as the service is in shutdown mode!");
 				return;
 			}
 
 			$command = 'ffmpeg '.implode(' ', $input).' '.implode(' ', $output);
-			echo "[ffmpeg][Info] Command: ".$command."\n";
+			$this->stdout("Command: ".$command);
 
 			$this->ffmpeg = new ChildProcess($command);
 			$this->ffmpeg->start($this->loop);
@@ -104,11 +104,16 @@
 			});
 
 			$this->ffmpeg->stderr->on('data', function ($chunk) {
-				echo "[ffmpeg][Error] ".$chunk;
+				$this->stderr($chunk.PHP_EOL);
 			});
 
 			$this->ffmpeg->on('exit', function($exitCode, $termSignal) {
-				echo '[ffmpeg][Error] Process exited with code ' . $exitCode . PHP_EOL;
+				if ($exitCode !== null) {
+					$this->stderr('Process exited with code "'.strval($exitCode).'"');
+				} else {
+					$this->stderr('Process has been terminated with code "'.strval($termSignal).'"');
+				}
+
 
 				// Shutdown all processes and end the event loop
 				$this->shutdown();
@@ -117,7 +122,7 @@
 
 		public function setupWebSocketServer($address, $port) {
 			if ($this->shutdown === true) {
-				echo "[ReStream][Error] Could not start the WebSocket server as the service is in shutdown mode!\n";
+				$this->stderr("Could not start the WebSocket server as the service is in shutdown mode!");
 				return;
 			}
 
@@ -133,7 +138,8 @@
 
 		public function setupMonitoring($period = 60) {
 			if ($this->shutdown === true) {
-				echo "[ReStream][Error] Could not setup monitoring as the service is in shutdown mode!\n";
+				echo "[ReStream][Error] \n";
+				$this->stderr("Could not setup monitoring as the service is in shutdown mode!");
 				return;
 			}
 
@@ -141,26 +147,25 @@
 				$memory_usage = number_format(((memory_get_usage(true) / 1024) / 1024), 2); // MB
 				$memory_peak_usage = number_format(((memory_get_peak_usage(true) / 1024) / 1024), 2); // MB
 
-				echo "[ReStream] =====   Memory usage   =====".PHP_EOL;
-				echo "[ReStream] Now:  ".$memory_usage." MB".PHP_EOL;
-				echo "[ReStream] Peak: ".$memory_peak_usage." MB".PHP_EOL;
+				$this->stdout("=====   Memory usage   =====");
+				$this->stdout("Now:  ".$memory_usage." MB");
+				$this->stdout("Peak: ".$memory_peak_usage." MB");
 
-
-				echo "[ReStream] =====   Benchmark Results   =====".PHP_EOL;
 				$benchmark_end = time();
 				$time_elapsed = (intval($benchmark_end) - intval($this->benchmark_start));
-				echo "[ReStream] Images: ".$this->image_count.PHP_EOL;
-				echo "[ReStream] Start: ".$this->benchmark_start.PHP_EOL;
-				echo "[ReStream] End: ".$benchmark_end.PHP_EOL;
-				echo "[ReStream] Elapsed: ".$time_elapsed." seconds".PHP_EOL;
-				echo "[ReStream] FPS: ".floatval(floatval($this->image_count) / floatval($time_elapsed)).PHP_EOL;
+				$this->stdout("=====   Benchmark Results   =====");
+				$this->stdout("Images: ".$this->image_count);
+				$this->stdout("Start: ".$this->benchmark_start);
+				$this->stdout("End: ".$benchmark_end);
+				$this->stdout("Elapsed: ".$time_elapsed." seconds");
+				$this->stdout("FPS: ".floatval(floatval($this->image_count) / floatval($time_elapsed)));
 
 				// Print websocket server statistics
 				if ($this->ws_server !== null) {
 					$this->ws_server->printStatistics();
 				}
 
-				echo "[ReStream] =====   End Monitoring   =====".PHP_EOL;
+				$this->stdout("=====   End Monitoring   =====");
 			});
 		}
 
@@ -233,12 +238,11 @@
 			if ($this->learning && $this->learning_cycle >= $this->learning_cycles_necessary) {
 				$this->learning = false;
 				$this->lines_to_skip = max((min($this->lines_learning) - 15), 0);
-				echo "[ReStream][Info] Learning finished with learning cycle $this->learning_cycle. Learned skip value is $this->lines_to_skip\n";
+				$this->stdout("Learning finished with learning cycle $this->learning_cycle. Learned skip value is $this->lines_to_skip");
 			}
 		}
 
 		private function shutdown() {
-			// TODO shutdown all processes and exit script execution
 			$this->shutdown = true;
 
 			// Terminate the ffmpeg process
@@ -251,7 +255,16 @@
 				$this->loop->stop();
 			}
 
-			die("[ReStream] Shutdown completed\n");
+			$this->stdout("Shutdown completed");
+			exit();
+		}
+
+		public function stdout($message) {
+			fwrite(STDOUT, "[ReStream][Info] ".$message.PHP_EOL);
+		}
+
+		public function stderr($message) {
+			fwrite(STDERR, "[ReStream][Error] ".$message.PHP_EOL);
 		}
 
 		private function isShutdown() {
@@ -265,7 +278,7 @@
 			if ($this->loop !== null) {
 				$this->loop->run();
 			} else {
-				echo "[ReStream][Critical] Could not start event loop!".PHP_EOL;
+				$this->stderr("Could not start event loop!");
 			}
 		}
 
@@ -275,11 +288,11 @@
 	if (isset($argc) && isset($argv) && $argc >= 3) { // min 2 arguments -> argc starts with 1 (first argument = filename)
 		// Check if the argument is between (incl.) 0 and 9
 		if (!is_numeric($argv[2]) || intval($argv[2]) < 0 || intval($argv[2]) >= 10) {
-			echo "Invalid argument for 'feed_number' given! Must be an integer between (incl.) 0 and 9\n";
-			echo "Usage: ./ReStream.php <input_rtsp_url> <feed_number>\n";
+			echo ("Invalid argument for 'feed_number' given! Must be an integer between (incl.) 0 and 9".PHP_EOL);
+			echo ("Usage: ./ReStream.php <input_rtsp_url> <feed_number>".PHP_EOL);
 		} else if (empty($argv[1]) || strpos($argv[1], "rtsp://") !== 0) {
-			echo "Invalid argument for 'input_rtsp_url' given! Must be an rtsp url and start with 'rtsp://'!\n";
-			echo "Usage: ./ReStream.php <input_rtsp_url> <feed_number>\n";
+			echo ("Invalid argument for 'input_rtsp_url' given! Must be an rtsp url and start with 'rtsp://'!".PHP_EOL);
+			echo ("Usage: ./ReStream.php <input_rtsp_url> <feed_number>".PHP_EOL);
 		} else {
 			$restream = new ReStream(
 				'0.0.0.0',
@@ -292,9 +305,9 @@
 				'-rtsp_transport tcp', // tcp necessary for unifi cameras!
 				'-i '.$argv[1] // '-i rtsp://184.72.239.149/vod/mp4:BigBuckBunny_175k.mov'
 			], [
-				'-an',
+				'-an', // No audio
 				'-q:v 2', // Video quality (best = 1)
-				'-b:v 1000k',
+				'-b:v 1000k', // Video bitrate
 				'-vsync 0',
 				'-vf fps=fps=10', // 10 fps
 				'-hide_banner',
@@ -305,12 +318,12 @@
 			$restream->run();
 
 			if (!$restream->isShutdown()) {
-				echo "Re-streaming service started on port ".'809'.strval($argv[2]).".";
+				echo "Re-streaming service started on port ".'809'.strval($argv[2]).".".PHP_EOL;
 			} else {
-				echo "Re-streaming service is in shutdown mode!";
+				echo "Re-streaming service is in shutdown mode!".PHP_EOL;
 			}
 		}
 	} else {
-		echo "Invalid command usage!\n";
-		echo "Usage: ./ReStream.php <input_rtsp_url> <feed_number>\n";
+		echo ("Invalid command usage!".PHP_EOL);
+		echo ("Usage: ./ReStream.php <input_rtsp_url> <feed_number>".PHP_EOL);
 	}
