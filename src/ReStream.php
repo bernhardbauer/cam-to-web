@@ -72,7 +72,7 @@
 				if ($this->wdt > 0) {
 					// Shutdown script if the watchdog timer has not been updated in the last 10 seconds
 					if ($this->wdt < (time() - 10)) {
-						$this->stderr("Watchdog call! Shutting down process because the timer has not been updated.");
+						$this->stderr("==> WATCHDOG <==  called! Shutting down process because the timer has not been updated.");
 						$this->shutdown();
 					}
 				}
