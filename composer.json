@@ -9,7 +9,8 @@
     },
     "require": {
         "cboden/ratchet": "^0.4.1",
-        "react/child-process": "^0.5.0"
+        "react/child-process": "^0.5.0",
+        "ratchet/pawl": "^0.3.1"
     },
     "license": "MIT",
     "authors": [
