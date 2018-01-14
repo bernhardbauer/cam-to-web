@@ -308,7 +308,7 @@
 				'-q:v 2', // Video quality (best = 1)
 				'-b:v 1000k', // Video bitrate
 				'-vsync 0',
-				'-vf fps=fps=10', // 10 fps
+				'-vf fps=fps=7', // 10 fps
 				'-hide_banner',
 				'-f image2',
 				'-updatefirst 1',

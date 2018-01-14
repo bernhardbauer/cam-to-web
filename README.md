@@ -16,11 +16,21 @@ This library may be used to re-stream camera feeds to a web page. It has been wr
 
 ## Usage
 
- To start re-streaming use `ffmpeg -y -rtsp_transport tcp -i RTSP_URL -an -q:v 1 -b:v 1000k -vsync 0 -vf fps=fps=15 -hide_banner -f image2 -updatefirst 1 pipe:1 | php src/re-stream.php`. It retrieves the RTSP stream, sends it through a parsing script and creates a new WebSocket server on the given port which will be used to distribute the image data to the clients.
+ To start re-streaming open a terminal, change into the src directory and execute the command `./ReStream.php <input_rtsp_url> <feed_number>`. It retrieves the RTSP stream, sends it through a parsing script and creates a new WebSocket server on port 809<feed_number> which will be used to distribute the image data to the clients.
+Change the port in index.html to match your feed number and open the file in your browser.
 
 
 
 ### Command Description
+
+ReStream
+
+* ./ReStream.php ReStream server
+* <input_rtsp_url> The stream url. Must be an rtsp url and start with 'rtsp://'
+* <feed_number> The feed number. Specifies on which port the websocket server will be opened (809<feed_number>). Must be an integer between (incl.) 0 and 9
+
+
+FFMPEG
 
 * `-rtsp_transport tcp` Use the TCP protocol to retrieve data from the RTSP url. If you are able to retrieve a stable stream over UDP this option may be omitted
 * `-an` Disable Audio
