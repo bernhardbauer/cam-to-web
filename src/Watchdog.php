@@ -58,10 +58,12 @@
 				return;
 			}
 
+			// Add watchdog timer
 			$this->wdt = $this->loop->addPeriodicTimer(1, function () {
 				foreach ($this->monitored_ports as $port => $connection_array) {
 					if (is_array($connection_array) && isset($connection_array['last_update'])) {
-						if ($connection_array['last_update'] < time() - 5) {
+						// Watchdog timer should be greater than reconnect time
+						if ($connection_array['last_update'] < time() - 15) {
 							shell_exec("lsof -n -i4TCP:".$port." | grep LISTEN | awk '{ print $2 }' | xargs kill -9");
 							$this->stdout('Killed process on port '.$port.'!');
 							$this->monitored_ports[$port] = null;
